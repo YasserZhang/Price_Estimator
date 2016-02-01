@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>NYC Real Estate Market Price Estimator</title>
+  <meta charset="utf-8">
+  <meta name="description" content="NYC Real Estate Market Price Estimator">
+  <meta name="author" content="Ning Zhang">
+  <meta name="generator" content="slidify" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta http-equiv="X-UA-Compatible" content="chrome=1">
+  <link rel="stylesheet" href="libraries/frameworks/io2012/css/default.css" media="all" >
+  <link rel="stylesheet" href="libraries/frameworks/io2012/css/phone.css" 
+    media="only screen and (max-device-width: 480px)" >
+  <link rel="stylesheet" href="libraries/frameworks/io2012/css/slidify.css" >
+  <link rel="stylesheet" href="libraries/highlighters/highlight.js/css/solarized_light.css" />
+  <base target="_blank"> <!-- This amazingness opens all links in a new tab. -->  <link rel=stylesheet href="./assets/css/ribbons.css"></link>
+
+  
+  <!-- Grab CDN jQuery, fall back to local if offline -->
+  <script src="http://ajax.aspnetcdn.com/ajax/jQuery/jquery-1.7.min.js"></script>
+  <script>window.jQuery || document.write('<script src="libraries/widgets/quiz/js/jquery.js"><\/script>')</script> 
+  <script data-main="libraries/frameworks/io2012/js/slides" 
+    src="libraries/frameworks/io2012/js/require-1.0.8.min.js">
+  </script>
+  
+  
+
+</head>
+<body style="opacity: 0">
+  <slides class="layout-widescreen">
+    
+    <!-- LOGO SLIDE -->
+        <slide class="title-slide segue nobackground">
+  <hgroup class="auto-fadein">
+    <h1>NYC Real Estate Market Price Estimator</h1>
+    <h2>estimating house prices based on historical data</h2>
+    <p>Ning Zhang<br/></p>
+  </hgroup>
+  <article></article>  
+</slide>
+    
+
+    <!-- SLIDES -->
+    <slide class="smaller" id="slide-1" style="background:;">
+  <hgroup>
+    <h2>Introduction</h2>
+  </hgroup>
+  <article data-timings="">
+    <p>The web-based real estate market price estimator evaluates the market value of a property of interest in the range of New York City. The algorithmic methods behind the estimator are linear regression model with no regularization and KNN model using Euclidean distance metric, both of which are trained with NYC real estate transaction records from May 2013 to December 2015, which are released by NYC Finance.  </p>
+
+<p>The estimator first shows a general view of a portion of sold properties on an NYC map; after the user loads in the information about a property of interest, the estimator presents a prediction of its market value along with a 95% confidence interval, and picks out among sold properties the top 5 nearest neighbors to it; at last, the app calculates geographical coordinates of the five nearest neighbors and the property of interest, illustrating them on map. Users have the discretion in choosing a specific K number of nearest neighbors they want the app to present.  </p>
+
+<p>Although the calculation of geographical coordinates of properties delays the app’s response to users’ requests, the app will get faster when more users load information into the app for estimation. Because the app, upon calculation, updates coordinates of nearest neighbors back into the database, which are remotely stored at Dropbox, it does not need to repeat the calculation when a sold property is picked out for the second time as nearest neighbor.</p>
+
+  </article>
+  <!-- Presenter Notes -->
+</slide>
+
+<slide class="class" id="id" style="background:;">
+  <hgroup>
+    <h3>linear Model Regression</h3>
+  </hgroup>
+  <article data-timings="">
+    <pre><code class="r">#load in all NYC real estate transaction records from May 2013 to December 2015
+allSales &lt;- read.csv(&quot;alldataforshinyapp.csv&quot;,header = T, stringsAsFactors = FALSE)
+lm_prediction &lt;- function(borough, zipcode, land, gross){
+    #features of the linear regression model
+    features &lt;- c(&quot;zip_code&quot;, &quot;log_land&quot;, &quot;log_gross_sq&quot;)
+    #response of the model
+    output &lt;- &#39;log_price&#39;
+    lm_data &lt;- data_filter(borough)
+    if (class(zipcode) == &quot;NULL&quot;){
+        zipcode = as.character(unique(lm_data$zip_code)[1])
+    }
+    lm_data &lt;- lm_data[,c(features,output)]
+    lm_data$zip_code &lt;- as.character(lm_data$zip_code)
+    test_data &lt;- lm_data[,features][1,]
+    test_data$zip_code &lt;- as.character(zipcode)
+    test_data$log_land &lt;-  log(land)
+    test_data$log_gross_sq &lt;- log(gross)^2
+    #list(str(test_data), str(new_data))
+    lmFit &lt;- lm(log_price ~ ., data = lm_data)
+    predictions &lt;- exp(predict(lmFit, test_data, type = &quot;response&quot;, interval = &quot;prediction&quot;))
+    predictions &lt;- as.data.frame(predictions)
+    names(predictions) = c(&quot;Estimated Price in US Dollars&quot;,&quot;Lower Bound&quot;, &quot;Upper Bound&quot;)
+    predictions
+}
+</code></pre>
+
+  </article>
+  <!-- Presenter Notes -->
+</slide>
+
+<slide class="smaller" id="slide-3" style="background:;">
+  <hgroup>
+    <h3>K Nearest Neighbors</h3>
+  </hgroup>
+  <article data-timings="">
+    <pre><code class="r">library(FNN)
+features_knn &lt;- c(&quot;RESIDENTIAL.UNITS&quot;, &quot;COMMERCIAL.UNITS&quot;, &quot;zip_code&quot;, &quot;log_land&quot;,
+                  &quot;log_gross&quot;,  &quot;log_gross_sq&quot;, &quot;log_land_sq&quot;)
+#fit the k nearest neighbors model
+knn_prediction &lt;- function(borough, input_res, input_com, input_zipcode,input_land, input_gross, input_k){
+    #create customized dataset
+    newdata = data_filter(borough)
+    #check the class of zip code value
+    if (class(input_zipcode) == &quot;NULL&quot;){input_zipcode = unique(newdata$zip_code)[1]}
+    #prepare test data and labels
+    labels &lt;- newdata$log_price
+    knn_data = newdata[,features_knn]
+    knn_data$zip_code &lt;- as.numeric(knn_data$zip_code)
+    test_knn &lt;- knn_data[1,]
+    test_knn$RESIDENTIAL.UNITS = input_res; test_knn$COMMERCIAL.UNITS = input_com
+    test_knn$zip_code = as.numeric(input_zipcode); test_knn$log_land = log(input_land)
+    test_knn$log_gross = log(input_gross); test_knn$log_gross_sq = test_knn$log_land^2
+    test_knn$log_gross_sq = test_knn$log_gross^2
+    #fit the knn model
+    kFit &lt;- knn(knn_data,test_knn[1,], labels, k = input_k, algorithm = &quot;brute&quot;)
+    indices = attr(kFit, &quot;nn.index&quot;)
+    newdata[indices,]}
+
+show_features &lt;- c(&quot;BOROUGH&quot;,&quot;NEIGHBORHOOD&quot;,&quot;ADDRESS&quot;, &quot;ZIP.CODE&quot;, &quot;RESIDENTIAL.UNITS&quot;, &quot;COMMERCIAL.UNITS&quot;,
+                   &quot;LAND.SQUARE.FEET&quot;, &quot;GROSS.SQUARE.FEET&quot;, &quot;YEAR.BUILT&quot;,&quot;SALE.PRICE&quot;, &quot;SALE.DATE&quot;)
+</code></pre>
+
+  </article>
+  <!-- Presenter Notes -->
+</slide>
+
+<slide class="" id="slide-4" style="background:;">
+  <hgroup>
+    <h3>Estimation Output</h3>
+  </hgroup>
+  <article data-timings="">
+    <pre><code class="r">#create new subset of data according to the borough users choosed
+data_filter &lt;- function(borough){allSales[allSales$BOROUGH == as.character(borough),]}
+#house input information
+borough = &quot;BROOKLYN&quot;;zipcode = &quot;11201&quot;;land_area_SquareFeet = 1000
+gross_lot_area_SquareFeet = 1000;commercial_units = 0;residential_units = 1
+#linear regression model predicts the estimated value of the house and its 95% CI
+prediction &lt;- lm_prediction(borough, zipcode, land_area_SquareFeet, gross_lot_area_SquareFeet)
+#linear model output
+prediction
+</code></pre>
+
+<pre><code>##   Estimated Price in US Dollars Lower Bound Upper Bound
+## 1                       1464885    510358.5     4204668
+</code></pre>
+
+<pre><code class="r">#KNN model predicts the nearest neighbor of the hosue when K=1.
+knn_output &lt;- knn_prediction(borough, residential_units, commercial_units,
+                             zipcode,land_area_SquareFeet, gross_lot_area_SquareFeet, input_k=1)
+#KNN output
+knn_output[,show_features]
+</code></pre>
+
+<pre><code>##       BOROUGH NEIGHBORHOOD             ADDRESS ZIP.CODE RESIDENTIAL.UNITS
+## 9539 BROOKLYN  BOERUM HILL  269 PACIFIC STREET    11201                 0
+##      COMMERCIAL.UNITS LAND.SQUARE.FEET GROSS.SQUARE.FEET YEAR.BUILT
+## 9539                1             1527              1025       2004
+##      SALE.PRICE  SALE.DATE
+## 9539 $2,000,000 2014-02-14
+</code></pre>
+
+<p>Finaly, all geo coordinates of the property of interest and its nearest neighbors are calculated with ggmap package, and illustrated on map with leaflet package.</p>
+
+  </article>
+  <!-- Presenter Notes -->
+</slide>
+
+    <slide class="backdrop"></slide>
+  </slides>
+  <div class="pagination pagination-small" id='io2012-ptoc' style="display:none;">
+    <ul>
+      <li>
+      <a href="#" target="_self" rel='tooltip' 
+        data-slide=1 title='Introduction'>
+         1
+      </a>
+    </li>
+    <li>
+      <a href="#" target="_self" rel='tooltip' 
+        data-slide=2 title='linear Model Regression'>
+         2
+      </a>
+    </li>
+    <li>
+      <a href="#" target="_self" rel='tooltip' 
+        data-slide=3 title='K Nearest Neighbors'>
+         3
+      </a>
+    </li>
+    <li>
+      <a href="#" target="_self" rel='tooltip' 
+        data-slide=4 title='Estimation Output'>
+         4
+      </a>
+    </li>
+  </ul>
+  </div>  <!--[if IE]>
+    <script 
+      src="http://ajax.googleapis.com/ajax/libs/chrome-frame/1/CFInstall.min.js">  
+    </script>
+    <script>CFInstall.check({mode: 'overlay'});</script>
+  <![endif]-->
+</body>
+  <!-- Load Javascripts for Widgets -->
+  
+  <!-- LOAD HIGHLIGHTER JS FILES -->
+  <script src="libraries/highlighters/highlight.js/highlight.pack.js"></script>
+  <script>hljs.initHighlightingOnLoad();</script>
+  <!-- DONE LOADING HIGHLIGHTER JS FILES -->
+   
+  </html>
